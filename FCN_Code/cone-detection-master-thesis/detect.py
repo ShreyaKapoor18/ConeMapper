@@ -10,6 +10,7 @@ from utils.image import clip_image, read_image, erode_image, tensor_to_image, im
 import matplotlib.pyplot as plt
 import argparse
 import pathlib
+# import time
 import torch
 import traceback
 import sys
@@ -68,6 +69,14 @@ def detect(image : np.ndarray, mode : str = "DT", postprocessing : str = "PBPP")
         pbpp.postprocess(loops=loops, steps=steps, progress_bar=True, verbose=False, add_particles=True, remove_particles=True) #progress_bar=False, verbose=True)
 
         cones = pbpp.particles.positions
+    
+    elif postprocessing.upper() == "DEFAULT":
+        # Extract local minima
+        pred = mask_array(pred, image, better_mask=True, fill=1) # 0 in DT denotes cone!
+        proc = minimum_postprocessing(pred, verbose=True, return_coordinates=True)
+        pred = mask_array(pred, image, better_mask=True, fill=0) # Undo masking with 1
+        
+        cones = proc
     else:
         raise "Unknown postprocessing"
 
@@ -97,6 +106,8 @@ if __name__ == "__main__":
         # open image
         # image values MUST BE in [0, 1] limits, otherwise CNN will produce garbadge!
         # image = read_image("image1.tif") / 255.0
+
+        # start_time = time.time()
         image = read_image(args.input) / 255.0
 
         print("Clipping...")
@@ -107,6 +118,10 @@ if __name__ == "__main__":
 
         print("Detecting and Post-Processing...")
         cones, raw = detect(image, mode="DT", postprocessing="PBPP")
+        
+        # end_time = time.time()  # Record end time
+        # execution_time = end_time - start_time
+        # print(f"Execution Time: {execution_time:.6f} seconds")
 
     except Exception as e:
         traceback.print_exc()
