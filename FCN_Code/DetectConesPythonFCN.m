@@ -22,14 +22,28 @@ function [data, probMap, res] = DetectConesPythonFCN(image1, path)
 
     path = pathes(1).folder;
 
-    % create waitbar
-    wb = waitbar(0, 'FCN is running. Please, wait...');
-    % get all children (including hidden)
-    wbch = allchild(wb);
-    % do Java magic
-    jp = wbch(1).JavaPeer;
-    jp.setIndeterminate(1);
+    v = version('-release');
+    subRelease = 1;
+    if strcmp(v(5), 'b')
+        subRelease = 2;
+    end
+    currnetMatlabVersion = [str2double(v(1:4)), subRelease];
 
+    % create waitbar
+    if currnetMatlabVersion(1) > 2024
+        wb = uiprogressdlg(gcf(), 'Title', 'FCN is running. Please, wait...', 'Indeterminate', 'on');
+    else
+        wb = waitbar(0, 'FCN is running. Please, wait...');
+        % get all children (including hidden)
+        wbch = allchild(wb);
+        % do Java magic
+        
+        jp = wbch(1).JavaPeer;
+        jp.setIndeterminate(1);
+    end
+    
+    
+    
     folderPath = [path, filesep(), 'tempData'];
     [~, ~, ~] = mkdir(folderPath);
 
@@ -208,6 +222,7 @@ end
 function isExceeding = CheckMemoryConsumingFCN(height, width)
     isExceeding = false;
 
+    parallel.gpu.enableCUDAForwardCompatibility(true);
     dev = gpuDevice();
     % prediction in Kilobyte
     coef = 1.435;

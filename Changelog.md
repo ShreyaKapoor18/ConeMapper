@@ -1,3 +1,8 @@
+### 05.08.2025
+ - Fixed:
+     - Bugs with R2025a version
+
+
 ### 21.10.2024
  - New features:
      - Add bull eye graph
