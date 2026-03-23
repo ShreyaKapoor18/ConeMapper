@@ -185,66 +185,62 @@ classdef EuclideanNCones < DensityMetricBase
             
             boundingPoly = boundary(conelocs(:, 1), conelocs(:, 2), 1);
             
-            % get starting coordinates (exclude the border area)
-            pixelStartX = round(max([min(conelocs(:,1)), 1]));
-            pixelEndX   = round(min([max(conelocs(:,1)), imageWidth]));
-            pixelStartY = round(max([min(conelocs(:,2)), 1]));
-            pixelEndY   = round(min([max(conelocs(:,2)), imageHeight]));
+            numberOfCones = size(conelocs, 1);
 
-            % preallocate memory for density matrix
-            densityMatrix = nan(imageHeight, imageWidth);
-            goodPointsMap = zeros(imageHeight, imageWidth);
+            isBoundary = false(numberOfCones, 1);
+            isBoundary(boundingPoly) = true;
+            % cones to exclude
+            excludeMask = isBoundary | isnan(coneArea);  
+
+            % KNN with extras for edge conditions
+            K_extra = numOfNearestCones + sum(excludeMask);
+            K_extra = min(K_extra, numberOfCones);
             
-            % vectors with ROI pixel indexes
-            pixelsY = pixelStartY:pixelEndY;
-            pixelsX = pixelStartX:pixelEndX;
-            % number of steps
-            nSteps = length(pixelsY);
-
+            % All pixels together
+            [xg, yg] = meshgrid(1:imageWidth, 1:imageHeight);
+            Q = [xg(:) yg(:)];
+            
+            Mdl = createns(conelocs, 'NSMethod', 'kdtree');
+            
+            % batches in order not to explode memory (if we have too big image)
+            batch_size = 5000;
+            density_img = nan(imageHeight*imageWidth, 1);
+            goodPointsMap = zeros(imageHeight*imageWidth, 1);
+            
             progressBar = waitbar(0, ['ConeDensity analysis - ', num2str(numOfNearestCones),' nearest cones']);
 
-            % for each column
-            for coorY = pixelsY                  % central pixel (x) of selection
-                % get row coordinates in pixels
-                row = combvec(pixelsX, coorY)';
-                % calculate distances from pixels in the row to each cone
-                distances = pdist2(conelocs, row);
-                % sort each column ascending
-                [~, originalColumnIndexes] = sort(distances, 1);
-
-                % for each pixel
-                for coorX = pixelsX              % central pixel (y) of selection
-                    % get indexes of cones with the smallest distances to current
-                    % pixel
-                    distIDXsorted = originalColumnIndexes(:, coorX - pixelStartX + 1);
-                    smallestIdx =  distIDXsorted(1:min([numOfNearestCones, length(distIDXsorted)]));
-                    
-                    isBoundingPolyPoint = ismember(smallestIdx, boundingPoly) | isnan(coneArea(smallestIdx));
-                    
-                    availiableCones = numOfNearestCones;
-                    % if there is at list one cone with extremly big area
-                    if any(isBoundingPolyPoint)
-                        isBoundingPolyPoint = ismember(distIDXsorted, boundingPoly) | isnan(coneArea(distIDXsorted));
-                        distIDXsorted = distIDXsorted(~isBoundingPolyPoint);
-                        availiableCones = min([numOfNearestCones, length(distIDXsorted)]);
-                        smallestIdx =  distIDXsorted(1:availiableCones);
-                    else
-                        goodPointsMap(coorY, coorX) = 1;
+            allPoints = size(Q,1);
+            for i = 1:batch_size:allPoints
+                batch = i:min(i+batch_size-1, allPoints);
+            
+                % KNN for current batch
+                idx_big = knnsearch(Mdl, Q(batch,:), 'K', K_extra);  % batch x K_extra
+            
+                for j = 1:numel(batch)
+                    row = idx_big(j,:);
+            
+                    % exclude edges and NaN area
+                    good = row(~excludeMask(row));
+                          
+                    n = min(numOfNearestCones, numel(good));
+                    if n == 0
+                        continue;
                     end
-                    
-                    % get voronoi areas of cones
-                    areaNearestVoronois = coneArea(smallestIdx);
-                    
-                    % calculate sum area of selected cones
-                    densityAreaVoronois = sum(areaNearestVoronois);
-                    % get density as number of cones divided by area they cover
-                    % cppa - cones per pixel area
-                    densityMatrix(coorY, coorX) = availiableCones / densityAreaVoronois;                    
-                end                                        % end of coorX loop
 
-                waitbar((coorY - pixelStartY) / nSteps)
-            end                                            % end of coorY loop
+                    if numel(row) >= numOfNearestCones && all(~excludeMask(row(1:numOfNearestCones)))
+                        goodPointsMap(batch(j)) = 1;
+                    end
+                  
+                    selectedIdx = good(1:n);
+                    density_img(batch(j)) = n / sum(coneArea(selectedIdx));
+                end
 
+                waitbar(i / allPoints);
+            end
+
+            densityMatrix = reshape(density_img, imageHeight, imageWidth);
+            goodPointsMap = reshape(goodPointsMap, imageHeight, imageWidth);
+            
             % get the edge of non aproximated area
             goodPointsEdge = EuclideanNCones.FindMapEdgeByConelocs(goodPointsMap, conelocs, 0.5);
             
@@ -254,6 +250,7 @@ classdef EuclideanNCones < DensityMetricBase
                 bw = poly2mask(boundaryConelocs(:, 1), boundaryConelocs(:, 2), imageHeight, imageWidth);
                 densityMatrix(sourceImage < 8 & bw == 0) = NaN;
             end
+
             close(progressBar);
         end
         
